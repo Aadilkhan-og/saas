@@ -1,64 +1,102 @@
+# Filename: src/modules/content_analyzer.py
 import os
 import re
 import json
 import logging
 import asyncio
-from browser_use import Agent
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# Removed GeminiClient import; using ChatGoogleGenerativeAI directly
+# Keep browser_use for content analysis, as it requires rendering/interaction
+try:
+    from browser_use import Agent, AgentHistoryList, ActionResult # Import necessary classes
+except ImportError:
+    Agent = None
+    AgentHistoryList = None
+    ActionResult = None
+    logging.error("browser_use not installed. Content analysis will not work.")
+
+# Import textstat for readability calculation
+try:
+    import textstat
+    TEXTSTAT_AVAILABLE = True
+except ImportError:
+    textstat = None
+    TEXTSTAT_AVAILABLE = False
+    logging.warning("textstat library not installed. Readability scores will not be calculated.")
+
 
 # Create module logger
 logger = logging.getLogger("keyword_research.content_analyzer")
 
 class ContentAnalyzer:
     """
-    Analyzes competitor content from top-ranking pages
+    Analyzes competitor content from top-ranking pages using browser-use
     """
-    
+
     def __init__(self):
-        self.google_api_key = os.getenv("GOOGLE_API_KEY")
         try:
-            from modules.gemini_client import GeminiClient
-            gemini_client = GeminiClient(api_key=self.google_api_key, model="gemini-2.0-flash")
-            self.llm = gemini_client.get_langchain_llm()
-            logger.info("Gemini initialized for ContentAnalyzer")
+            self.api_key = os.getenv("GOOGLE_API_KEY")
+            self.model = "gemini-2.0-flash"
+            if Agent:
+                self.llm = ChatGoogleGenerativeAI(
+                    model=self.model,
+                    google_api_key=self.api_key,
+                    temperature=0.7
+                )
+                logger.info("ChatGoogleGenerativeAI (Gemini) initialized for ContentAnalyzer")
+                self.agent_available = True
+            else:
+                self.llm = None
+                self.agent_available = False
+                logger.error("browser_use not installed. Content analysis agent not available.")
         except Exception as e:
-            logger.error(f"Error initializing Gemini: {str(e)}")
+            logger.error(f"Error initializing ChatGoogleGenerativeAI in ContentAnalyzer: {str(e)}")
             self.llm = None
-    
+            self.agent_available = False
+            self.agent_available = False
+
+
     async def analyze_content(self, urls, max_urls=5):
         """
         Analyze content from the provided URLs
-        
+
         Args:
             urls (list): List of URLs to analyze
             max_urls (int): Maximum number of URLs to analyze
-            
+
         Returns:
             dict: Analysis of competitor content
         """
         logger.info(f"Analyzing content from {len(urls)} URLs (max {max_urls})")
-        
+
         # Initialize results dictionary
         results = {
             "analyzed_urls": [],
-            "content_analysis": {},
-            "common_themes": [],
-            "content_types": {},
-            "heading_structure": {},
-            "content_length": {},
-            "summary": {
+            "content_analysis": {}, # Detailed analysis per URL
+            "common_themes": [], # Aggregated themes
+            "content_types": {}, # Aggregated types count
+            "heading_structure": {}, # Detailed headings (per URL)
+            "content_length": {}, # Detailed word count (per URL)
+            "readability_scores": {}, # Detailed readability (per URL) - NEW
+            "summary": { # Aggregated summary
                 "avg_word_count": 0,
+                "avg_readability_score": 0, # NEW
                 "content_types": {},
                 "most_common_content_type": "unknown",
                 "media_types": {},
-                "content_freshness": "unknown"
+                "content_freshness": "unknown", # Still heuristic/placeholder
+                "common_themes_summary": [] # NEW - top themes list
             }
         }
-        
-        # Check if there are any URLs to analyze
-        if not urls:
-            logger.warning("No URLs to analyze")
+
+        # Check if analysis agent is available
+        if not self.agent_available:
+            logger.error("Content analysis agent is not available. Skipping content analysis.")
             return results
-            
+
+
         # Validate URLs before processing
         valid_urls = []
         for url in urls:
@@ -67,527 +105,582 @@ class ContentAnalyzer:
             if url and url.startswith(('http://', 'https://')):
                 valid_urls.append(url)
             else:
-                logger.warning(f"Invalid URL skipped: {url}")
-        
+                logger.warning(f"Invalid URL skipped during analysis: {url}")
+
         if not valid_urls:
             logger.warning("No valid URLs to analyze")
             return results
-            
+
         # Limit the number of URLs to analyze
         urls_to_analyze = valid_urls[:min(max_urls, len(valid_urls))]
         logger.info(f"Processing {len(urls_to_analyze)} valid URLs: {urls_to_analyze}")
-        
+
         # Initialize counters for summary data
         total_word_count = 0
+        total_readability_score = 0 # NEW
         content_types_counter = {}
         media_types_counter = {}
         analyzed_count = 0
         all_themes = []
-        
+
         # Process each URL
-        for url in urls_to_analyze:
-            try:
-                # Analyze content for this URL
-                content_data = await self._analyze_url_content(url)
-                
-                # Print content data for debugging
-                logger.debug(f"Content data for {url}: {json.dumps(content_data, indent=2)}")
-                
-                # Check if we have valid content data that's not just the error template
-                if content_data and "error" not in content_data:
-                    # Store results
-                    results["analyzed_urls"].append(url)
-                    results["content_analysis"][url] = content_data
-                    
-                    # Store content type - ensure it's not empty
-                    content_type = content_data.get("content_type", "unknown")
-                    if not content_type or content_type.lower() == "null" or content_type.lower() == "none":
-                        content_type = "unknown"
-                    
-                    results["content_types"][url] = content_type
-                    content_types_counter[content_type] = content_types_counter.get(content_type, 0) + 1
-                    
-                    # Store heading structure
-                    headings = content_data.get("headings", [])
-                    if isinstance(headings, list) and headings:
-                        results["heading_structure"][url] = headings
-                    
-                    # Store content length - ensure it's a valid number
-                    word_count = content_data.get("word_count", 0)
-                    if word_count and isinstance(word_count, (int, float)) and word_count > 0:
-                        results["content_length"][url] = word_count
-                        total_word_count += word_count
-                        analyzed_count += 1
-                        logger.info(f"Added word count for {url}: {word_count}")
-                    else:
-                        logger.warning(f"Invalid word count for {url}: {word_count}")
-                    
-                    # Track media types
-                    media_types = content_data.get("media_types", [])
-                    if isinstance(media_types, list):
-                        for media_type in media_types:
-                            if media_type:  # Skip empty values
-                                media_types_counter[media_type] = media_types_counter.get(media_type, 0) + 1
-                    
-                    # Collect themes for later processing
-                    themes = content_data.get("key_themes", [])
-                    if isinstance(themes, list):
-                        all_themes.extend([t for t in themes if t])  # Skip empty values
-                    
-                    logger.info(f"Successfully analyzed content for URL: {url}")
+        tasks = [self._analyze_url_content_robust(url) for url in urls_to_analyze]
+        analyzed_results = await asyncio.gather(*tasks)
+
+
+        for url, content_data in zip(urls_to_analyze, analyzed_results):
+             if content_data and "error" not in content_data:
+                # Store results
+                results["analyzed_urls"].append(url)
+                results["content_analysis"][url] = content_data
+
+                # Store content type - ensure it's not empty
+                content_type = content_data.get("content_type", "unknown")
+                if not content_type or content_type.lower() in ["null", "none", "unknown"]:
+                    content_type = "unknown"
+                results["content_types"][url] = content_type
+                content_types_counter[content_type] = content_types_counter.get(content_type, 0) + 1
+
+                # Store heading structure
+                headings = content_data.get("headings", [])
+                if isinstance(headings, list) and headings:
+                    results["heading_structure"][url] = headings
+
+                # Store content length - ensure it's a valid number
+                word_count = content_data.get("word_count", 0)
+                if word_count and isinstance(word_count, (int, float)) and word_count > 0:
+                    results["content_length"][url] = word_count
+                    total_word_count += word_count
+                    # analyzed_count += 1 # Increment analyzed_count only if both word count and readability are successful below
+
+                # Store readability score - NEW
+                readability_score = content_data.get("readability_score")
+                if readability_score is not None and isinstance(readability_score, (int, float)):
+                     results["readability_scores"][url] = readability_score
+                     total_readability_score += readability_score
+                     analyzed_count += 1 # Increment only if both major metrics are captured
+                     logger.info(f"Added word count ({word_count}) and readability ({readability_score}) for {url}")
                 else:
-                    logger.warning(f"Failed to extract useful content from URL: {url}")
-            
-            except Exception as e:
-                logger.error(f"Failed to analyze content for URL '{url}': {str(e)}", exc_info=True)
-        
+                     logger.warning(f"Invalid or missing readability score for {url}: {readability_score}")
+                     # If readability failed, don't count this URL towards the average
+                     if word_count > 0: # Log that word count was found but not used for avg
+                          logger.warning(f"Word count ({word_count}) found for {url} but not included in average due to missing readability.")
+
+
+                # Track media types
+                media_types = content_data.get("media_types", [])
+                if isinstance(media_types, list):
+                    for media_type in media_types:
+                        if media_type and isinstance(media_type, str): # Skip empty or invalid values
+                            media_types_counter[media_type.lower()] = media_types_counter.get(media_type.lower(), 0) + 1 # Use lowercase for consistency
+
+                # Collect themes for later processing
+                themes = content_data.get("key_themes", [])
+                if isinstance(themes, list):
+                    all_themes.extend([t for t in themes if t and isinstance(t, str)]) # Skip empty or invalid values
+
+                logger.info(f"Successfully processed analysis data for URL: {url}")
+
+             else:
+                logger.warning(f"Failed to extract useful content analysis data from URL: {url}")
+
+
         # Process the collected data
-        logger.info(f"Total word count: {total_word_count}, Analyzed count: {analyzed_count}")
-        logger.info(f"Content types: {content_types_counter}")
-        logger.info(f"Media types: {media_types_counter}")
+        logger.info(f"Total word count: {total_word_count}, Total readability score: {total_readability_score}, Analyzed count for averages: {analyzed_count}")
+        logger.info(f"Content types counter: {content_types_counter}")
+        logger.info(f"Media types counter: {media_types_counter}")
         logger.info(f"All themes count: {len(all_themes)}")
-        
+
         # Generate common themes from all collected themes
         if all_themes:
             results["common_themes"] = self._extract_common_themes_from_list(all_themes)
-            logger.info(f"Extracted {len(results['common_themes'])} common themes")
-        
+            logger.info(f"Extracted {len(results['common_themes'])} common themes across URLs")
+            results["summary"]["common_themes_summary"] = results["common_themes"] # Add to summary
+
+
         # Calculate summary statistics
         if analyzed_count > 0:
             results["summary"]["avg_word_count"] = int(total_word_count / analyzed_count)
-            logger.info(f"Average word count: {results['summary']['avg_word_count']}")
+            results["summary"]["avg_readability_score"] = round(total_readability_score / analyzed_count, 1) # NEW - Avg readability
+            logger.info(f"Average word count: {results['summary']['avg_word_count']}, Average readability: {results['summary']['avg_readability_score']}")
         else:
-            logger.warning("No analyzed URLs with valid word counts")
-        
+            logger.warning("No URLs with valid analysis data for averages.")
+            results["summary"]["avg_word_count"] = 0
+            results["summary"]["avg_readability_score"] = 0
+
+
         results["summary"]["content_types"] = content_types_counter
-        
+
         # Determine most common content type
         if content_types_counter:
-            results["summary"]["most_common_content_type"] = max(content_types_counter.items(), key=lambda x: x[1])[0]
+            # Sort content types by count descending and take the type
+            sorted_content_types = sorted(content_types_counter.items(), key=lambda item: item[1], reverse=True)
+            results["summary"]["most_common_content_type"] = sorted_content_types[0][0]
             logger.info(f"Most common content type: {results['summary']['most_common_content_type']}")
-        
+        else:
+             results["summary"]["most_common_content_type"] = "unknown"
+
+
         results["summary"]["media_types"] = media_types_counter
-        
+
+        # Content freshness is still a placeholder/heuristic for now
+        results["summary"]["content_freshness"] = "mixed" # Placeholder
+
+
         return results
-    
-    async def _analyze_url_content(self, url):
+
+
+    async def _analyze_url_content_robust(self, url):
         """
-        Analyze content from a single URL
-        
+        Analyze content from a single URL with enhanced extraction and retries.
+
         Args:
             url (str): URL to analyze
-            
+
         Returns:
-            dict: Content analysis for the URL
+            dict: Content analysis for the URL, including error key on failure
         """
-        # Create a task for the agent
+        if not self.agent_available:
+             logger.error("Content analysis agent not available, cannot analyze URL content.")
+             return self._create_default_content_data(url, error="Agent not available")
+
+        # Create a detailed task for the agent
         task = f"""
-        Visit the URL '{url}' and analyze the content. Extract the following information:
-        
-        1. Page title
-        2. Main heading (H1)
-        3. Subheadings (H2 and H3 tags)
-        4. Word count (approximate)
-        5. Content type (article, product page, landing page, etc.)
-        6. Key themes and topics covered
-        7. Media types present (text only, images, videos, interactive elements)
-        8. Publication or last updated date (if available)
-        
-        Return the results in JSON format with the following structure:
+        Visit the URL '{url}' and carefully analyze the content to extract the following information.
+        Focus on the main body content of the page, typical of an article, blog post, or product/service page.
+
+        1.  **Page Title:** The exact title from the HTML <title> tag.
+        2.  **Main Heading (H1):** The text content of the primary H1 tag on the page.
+        3.  **Subheadings (H2 and H3):** A list of the text content of all H2 and H3 tags in order of their appearance.
+        4.  **Main Text Content:** Extract the primary narrative or informational text content of the page's main body. Exclude headers, footers, sidebars, navigation, comments, and repetitive boilerplate text. Aim to capture the core written content.
+        5.  **Word Count:** An approximate word count of the **Main Text Content** you extracted in step 4.
+        6.  **Content Type:** Categorize the main type of content (e.g., "Blog Post", "Guide", "Product Page", "Landing Page", "Review", "Comparison", "Category Page", "Informational Article"). Be specific based on the page's primary purpose.
+        7.  **Key Themes and Topics:** A list of the main themes, topics, or subjects discussed in the main body content. Focus on the core concepts.
+        8.  **Media Types Present:** A list of significant media types found in the main content area (e.g., "Images", "Videos", "Infographics", "Interactive Elements", "Audio", "Text Only"). List "Text Only" if no significant media is present.
+        9.  **Publication or Last Updated Date:** Find the publication date or last updated date if clearly visible on the page. Return null if not found.
+        10. **Main Points/Thesis:** Briefly summarize the core message or main points the content is trying to convey (2-3 sentences).
+        11. **Explicit Calls to Action (CTAs):** Identify any clear calls to action within the main content (e.g., "Buy Now", "Sign Up", "Download Guide", "Contact Us"). List the text of the CTA. Return an empty list if none are found.
+
+        Return the results EXCLUSIVELY as a single, valid JSON object. Ensure all property names and string values within the JSON are correctly formatted and escaped. The JSON structure must be EXACTLY:
         {{
             "title": "Page Title",
             "h1": "Main Heading",
             "headings": ["Subheading 1", "Subheading 2", ...],
-            "word_count": 1500,
-            "content_type": "blog article",
+            "main_text_content": "The extracted main text content...", # NEW field
+            "word_count": 1500, # Count of main_text_content
+            "content_type": "Blog Post",
             "key_themes": ["Theme 1", "Theme 2", ...],
-            "media_types": ["text", "images", ...],
-            "publication_date": "2023-05-15" (or null if not found)
+            "media_types": ["Images", "Videos", ...],
+            "publication_date": "YYYY-MM-DD" or "Month Day, Year" or null,
+            "main_points_summary": "Summary of main points...", # NEW field
+            "calls_to_action": ["CTA Text 1", "CTA Text 2", ...] # NEW field
         }}
-        
-        Only return the JSON object, nothing else.
+
+        Do NOT include any other text, markdown formatting (like ```json```), or explanation outside the single JSON object. If a field is not found or applicable, return null (for single values) or an empty array (for lists). Ensure the JSON is perfectly formatted for direct parsing.
         """
-        
-        # Add retries for reliability
-        max_retries = 2
+
+        max_retries = 3 # Increased retries for potential agent issues
         for attempt in range(max_retries + 1):
             try:
-                # Create and run the agent with headless mode to avoid emoji rendering issues
-                if not self.llm:
-                    raise ValueError("LLM not initialized")
-                
+                # Create a browser-use agent
                 agent = Agent(
                     task=task,
                     llm=self.llm,
+                    # browser_config={"headless": True} # Keep headless if desired
                 )
-                
+
                 # Run the agent
                 logger.info(f"Running content analysis agent for URL (attempt {attempt+1}/{max_retries+1}): {url}")
-                result = await agent.run()
-                logger.info(f"Content analysis completed for URL: {url}")
-                
-                # Parse the result using various methods
-                content_data = self._extract_content_data(result, url)
-                
-                # Log the extracted data
-                logger.info(f"Extracted content data for {url}: word_count={content_data.get('word_count')}, content_type={content_data.get('content_type')}")
-                
-                # Post-process the data to ensure validity
-                processed_data = self._postprocess_content_data(content_data)
-                
-                # Only return if we have at least some meaningful data
-                if processed_data.get("title") or processed_data.get("word_count"):
-                    return processed_data
-                else:
-                    logger.warning(f"Extracted data lacks critical fields (title or word_count), retry attempt {attempt+1}/{max_retries+1}")
-                    if attempt == max_retries:
-                        # Last attempt failed, return whatever we got
-                        return processed_data
-            
-            except Exception as e:
-                logger.error(f"Error analyzing URL '{url}' (attempt {attempt+1}/{max_retries+1}): {str(e)}")
-                if attempt == max_retries:
-                    return self._create_default_content_data(url)
-                
-                # Wait a bit before retrying
-                await asyncio.sleep(1)
-        
-        # Should never reach here but just in case
-        return self._create_default_content_data(url)
-    
-    def _postprocess_content_data(self, content_data):
-        """
-        Post-process content data to ensure validity
-        
-        Args:
-            content_data (dict): Raw content data
-            
-        Returns:
-            dict: Processed content data
-        """
-        # Create a copy to avoid modifying the original
-        processed = content_data.copy() if content_data else self._create_default_content_data("unknown")
-        
-        # Ensure word_count is an integer
-        if "word_count" in processed:
-            try:
-                # Convert word count to integer
-                if processed["word_count"] is not None:
-                    if isinstance(processed["word_count"], str):
-                        # Remove any non-numeric characters
-                        numeric_part = re.sub(r'[^0-9]', '', processed["word_count"])
-                        if numeric_part:
-                            processed["word_count"] = int(numeric_part)
-                        else:
-                            processed["word_count"] = 0
+                # Use a timeout for the agent run itself
+                agent_run_timeout = 60 # seconds per URL, adjust as needed
+                try:
+                    result = await asyncio.wait_for(agent.run(), timeout=agent_run_timeout)
+                    logger.info(f"Content analysis attempt completed for URL: {url}")
+                except asyncio.TimeoutError:
+                    logger.warning(f"Content analysis agent timed out for URL: {url} on attempt {attempt+1}. Retrying...")
+                    if attempt < max_retries:
+                        await asyncio.sleep(5) # Wait longer before retrying after timeout
+                        continue
                     else:
-                        processed["word_count"] = int(processed["word_count"])
+                        logger.error(f"Content analysis agent timed out after {max_retries} retries for URL: {url}.")
+                        return self._create_default_content_data(url, error="Analysis timed out")
+
+
+                # Parse the result using enhanced extraction logic
+                content_data = self._extract_content_data(result, url)
+
+                # Post-process the data and calculate readability
+                processed_data = self._postprocess_content_data(content_data, url) # Pass URL for logging/defaults
+
+                # Log the processed data (excluding potentially large text content)
+                loggable_data = processed_data.copy()
+                if "main_text_content" in loggable_data:
+                    loggable_data["main_text_content"] = f"[{len(loggable_data['main_text_content'] or '')} chars]" # Log char count instead of text
+                logger.debug(f"Processed content data for '{url}' (Attempt {attempt+1}): {json.dumps(loggable_data, indent=2)}")
+
+
+                # Basic validation: Check if we got at least a title and some text content or word count
+                if processed_data.get("title") and (processed_data.get("main_text_content") or processed_data.get("word_count", 0) > 0):
+                     logger.info(f"Successfully extracted useful content data on attempt {attempt+1} for URL: {url}")
+                     return processed_data
                 else:
-                    processed["word_count"] = 0
-            except (ValueError, TypeError):
+                    logger.warning(f"Agent result for '{url}' did not return sufficient data (missing title or content/word count) on attempt {attempt+1}/{max_retries+1}. Retrying...")
+
+
+            except Exception as e:
+                logger.error(f"Error running or processing agent for '{url}' (attempt {attempt+1}/{max_retries+1}): {str(e)}", exc_info=True)
+                # Error occurred, retry
+
+            # Wait a bit before retrying
+            if attempt < max_retries:
+                 await asyncio.sleep(2)
+
+        # If all retries failed, return a default structure with an error flag
+        logger.error(f"All retries failed for URL '{url}'. Returning empty content data.")
+        return self._create_default_content_data(url, error="Analysis failed after retries")
+
+
+    def _postprocess_content_data(self, content_data, url):
+        """
+        Post-process raw extracted content data, calculate readability, and ensure validity.
+
+        Args:
+            content_data (dict): Raw content data extracted by the agent.
+            url (str): The URL analyzed (for context/default data).
+
+        Returns:
+            dict: Processed and cleaned content data with added readability score.
+        """
+        # Start with a default structure to ensure all keys exist
+        processed = self._create_default_content_data(url)
+
+        # Update with extracted data if available and valid
+        if isinstance(content_data, dict):
+            processed.update({
+                "title": content_data.get("title", processed["title"]),
+                "h1": content_data.get("h1", processed["h1"]),
+                "headings": content_data.get("headings", processed["headings"]),
+                "main_text_content": content_data.get("main_text_content", processed["main_text_content"]), # Keep the raw text
+                "word_count": content_data.get("word_count", processed["word_count"]),
+                "content_type": content_data.get("content_type", processed["content_type"]),
+                "key_themes": content_data.get("key_themes", processed["key_themes"]),
+                "media_types": content_data.get("media_types", processed["media_types"]),
+                "publication_date": content_data.get("publication_date", processed["publication_date"]),
+                "main_points_summary": content_data.get("main_points_summary", processed["main_points_summary"]), # NEW
+                "calls_to_action": content_data.get("calls_to_action", processed["calls_to_action"]), # NEW
+                # Carry over error flag if it exists in the raw data
+                "error": content_data.get("error", processed.get("error"))
+            })
+
+
+        # --- Cleaning and Validation ---
+
+        # Ensure word_count is a non-negative integer
+        try:
+            if processed["word_count"] is not None:
+                if isinstance(processed["word_count"], str):
+                    # Remove non-numeric characters and convert
+                    numeric_part = re.sub(r'[^0-9]', '', str(processed["word_count"]))
+                    processed["word_count"] = int(numeric_part) if numeric_part else 0
+                else:
+                    processed["word_count"] = int(processed["word_count"])
+            else:
                 processed["word_count"] = 0
-        else:
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert word_count to int for {url}. Value: {processed['word_count']}")
             processed["word_count"] = 0
-        
-        # Ensure content_type is a string
-        if "content_type" not in processed or not processed["content_type"]:
+        processed["word_count"] = max(0, processed["word_count"]) # Ensure non-negative
+
+
+        # Ensure content_type is a string and lowercase for consistency
+        if not isinstance(processed["content_type"], str) or not processed["content_type"].strip():
             processed["content_type"] = "unknown"
-        
-        # Ensure headings is a list
-        if "headings" not in processed or not isinstance(processed["headings"], list):
-            processed["headings"] = []
-        
-        # Ensure key_themes is a list
-        if "key_themes" not in processed or not isinstance(processed["key_themes"], list):
-            processed["key_themes"] = []
-        
-        # Ensure media_types is a list
-        if "media_types" not in processed or not isinstance(processed["media_types"], list):
-            processed["media_types"] = ["text"]  # Default to text
-        
+        else:
+             processed["content_type"] = processed["content_type"].strip().lower()
+             # Basic mapping for variations
+             if processed["content_type"] in ["blog article", "article", "post"]:
+                  processed["content_type"] = "blog post"
+             elif processed["content_type"] in ["product page", "product information"]:
+                  processed["content_type"] = "product page"
+             elif processed["content_type"] in ["landing page", "sales page"]:
+                  processed["content_type"] = "landing page"
+             elif processed["content_type"] in ["review article", "product review"]:
+                  processed["content_type"] = "review"
+             elif processed["content_type"] in ["comparison article", "vs page"]:
+                  processed["content_type"] = "comparison"
+             elif processed["content_type"] in ["guide", "tutorial", "how-to"]:
+                  processed["content_type"] = "guide"
+             elif processed["content_type"] in ["category page", "product listing page"]:
+                  processed["content_type"] = "category page"
+
+
+        # Ensure lists are lists of non-empty strings
+        for field in ["headings", "key_themes", "media_types", "calls_to_action"]:
+            if not isinstance(processed.get(field), list):
+                processed[field] = []
+            else:
+                 # Filter out any non-string or empty/whitespace-only values
+                 processed[field] = [item.strip() for item in processed[field] if isinstance(item, str) and item.strip()]
+                 # Convert media types to lowercase for consistency
+                 if field == "media_types":
+                      processed[field] = [item.lower() for item in processed[field]]
+
+
+        # Ensure main_text_content is a string
+        if not isinstance(processed["main_text_content"], str) or not processed["main_text_content"].strip():
+             processed["main_text_content"] = "" # Ensure empty string if no text or just whitespace
+
+
+        # Ensure main_points_summary is a string
+        if not isinstance(processed["main_points_summary"], str):
+             processed["main_points_summary"] = ""
+
+
+        # Calculate Readability Score - NEW
+        processed["readability_score"] = None # Default to None
+        if TEXTSTAT_AVAILABLE and processed["main_text_content"]:
+            try:
+                # Using Flesch-Kincaid Grade Level - adjust if a different score is preferred
+                # This score estimates the U.S. school grade level required to understand the text.
+                fk_score = textstat.flesch_kincaid_grade(processed["main_text_content"])
+                # textstat can sometimes return negative values for very simple text, cap at 0 or a small number
+                processed["readability_score"] = max(0.0, round(fk_score, 1))
+                logger.debug(f"Calculated readability score for {url}: {processed['readability_score']}")
+            except Exception as e:
+                logger.warning(f"Could not calculate readability score for {url}: {str(e)}")
+                processed["readability_score"] = None # Explicitly set to None on error
+        elif processed["main_text_content"]:
+             logger.warning(f"textstat not available, could not calculate readability for {url}.")
+
+
         return processed
-    
+
+
     def _extract_content_data(self, result, url):
         """
-        Extract content data from agent result using multiple approaches
-        
+        Extract content data from agent result using multiple approaches.
+        Enhanced to handle the new fields.
+
         Args:
-            result: Agent result object
-            url: URL being analyzed
-            
+            result: Agent result object (likely AgentHistoryList).
+            url: URL being analyzed.
+
         Returns:
-            dict: Extracted content data
+            dict: Extracted content data dictionary, or empty dict if parsing fails.
         """
-        try:
-            # Dump the result object structure for debugging
-            logger.debug(f"Result object type: {type(result)}")
-            if hasattr(result, '__dict__'):
-                logger.debug(f"Result attributes: {result.__dict__.keys()}")
-            
-            # 1. Try to extract direct result format (preferred format from my testing)
-            result_str = str(result)
-            if "Result: {" in result_str:
-                # Extract between "Result: " and the next occurrence of "Task completed" or end of string
-                result_json_str = result_str.split("Result: ", 1)[1]
-                if "Task completed" in result_json_str:
-                    result_json_str = result_json_str.split("Task completed", 1)[0]
-                else:
-                    # Take everything up to the last closing brace
-                    last_brace = result_json_str.rfind("}")
-                    if last_brace > 0:
-                        result_json_str = result_json_str[:last_brace+1]
-                
-                # Clean up any leading/trailing whitespace
-                result_json_str = result_json_str.strip()
-                
-                try:
-                    # Try to parse the JSON
-                    data = json.loads(result_json_str)
-                    logger.info(f"Successfully extracted content data from direct result JSON: {url}")
+        if not result:
+            logger.debug("_extract_content_data received empty result.")
+            return {}
+
+        # Prioritize extraction from ActionResult objects, especially the final one
+        if AgentHistoryList is not None and isinstance(result, AgentHistoryList):
+            logger.debug(f"Result is AgentHistoryList. Attempting to extract from action_results().")
+            try:
+                action_results = result.action_results()
+                if isinstance(action_results, list) and action_results:
+                    # Try the latest ActionResult first, especially 'done' action
+                    for action_result in reversed(action_results):
+                         if hasattr(action_result, 'extracted_content') and action_result.extracted_content:
+                              content = action_result.extracted_content
+                              if isinstance(content, dict):
+                                  # Found a dict directly, likely the parsed JSON
+                                  logger.debug("Extracted dict from ActionResult.extracted_content")
+                                  # Basic validation
+                                  if 'title' in content or 'word_count' in content or 'main_text_content' in content:
+                                       return content
+                              elif isinstance(content, str):
+                                  content_str = content.strip()
+                                  if content_str:
+                                       # Try parsing as JSON directly
+                                       try:
+                                            data = json.loads(content_str)
+                                            logger.debug("Parsed JSON from ActionResult.extracted_content string")
+                                            if 'title' in data or 'word_count' in data or 'main_text_content' in data:
+                                                 return data
+                                       except json.JSONDecodeError:
+                                            # Try finding JSON within markdown block
+                                            json_block_match = re.search(r'```json\s*([\s\S]*?)\s*```', content_str)
+                                            if json_block_match:
+                                                json_str = json_block_match.group(1).strip()
+                                                try:
+                                                    data = json.loads(json_str)
+                                                    logger.debug("Parsed JSON from markdown block in ActionResult")
+                                                    if 'title' in data or 'word_count' in data or 'main_text_content' in data:
+                                                         return data
+                                                except json.JSONDecodeError:
+                                                    pass # Continue searching in other results
+
+            except AttributeError as e:
+                logger.debug(f"Could not use action_results() method or extracted_content: {e}. Using fallback methods.")
+            except Exception as e:
+                 logger.warning(f"Error during ActionResult extraction: {e}. Falling back.")
+
+
+        # Fallback: Try parsing from string representation if ActionResult extraction failed
+        logger.debug("Falling back to parsing string representation of entire result object.")
+        result_str = str(result) # Get the string representation of the result object
+
+        # Look for JSON within ```json ... ``` markdown block
+        json_block_match = re.search(r'```json\s*([\s\S]*?)\s*```', result_str, re.DOTALL)
+        if json_block_match:
+            json_str = json_block_match.group(1).strip()
+            try:
+                data = json.loads(json_str)
+                logger.debug("Extracted JSON from ```json``` block in full string representation.")
+                # Basic validation for expected keys including new ones
+                if isinstance(data, dict) and ('title' in data or 'word_count' in data or 'main_text_content' in data):
                     return data
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse direct result JSON: {e}")
-                    # Continue to other methods
-            
-            # 2. Try to extract from agent's direct result object
-            if hasattr(result, '__dict__'):
-                # First, check if the result itself has useful attributes
-                if hasattr(result, 'title') and hasattr(result, 'word_count'):
-                    return {
-                        "title": getattr(result, 'title', ''),
-                        "h1": getattr(result, 'h1', ''),
-                        "headings": getattr(result, 'headings', []),
-                        "word_count": getattr(result, 'word_count', 0),
-                        "content_type": getattr(result, 'content_type', 'unknown'),
-                        "key_themes": getattr(result, 'key_themes', []),
-                        "media_types": getattr(result, 'media_types', []),
-                        "publication_date": getattr(result, 'publication_date', None)
-                    }
-                
-                # 3. Try to access agent's all_results for the done action
-                all_results = getattr(result, 'all_results', None)
-                if all_results and isinstance(all_results, list):
-                    for action_result in all_results:
-                        if hasattr(action_result, 'is_done') and action_result.is_done:
-                            if hasattr(action_result, 'extracted_content'):
-                                content = action_result.extracted_content
-                                if isinstance(content, dict):
-                                    return content
-                                elif isinstance(content, str):
-                                    try:
-                                        return json.loads(content)
-                                    except json.JSONDecodeError:
-                                        # Continue to next approach
-                                        pass
-                
-                # 4. Try model_outputs for the 'done' action
-                model_outputs = getattr(result, 'all_model_outputs', None)
-                if model_outputs and isinstance(model_outputs, list):
-                    for output in model_outputs:
-                        if isinstance(output, dict) and 'done' in output:
-                            done_data = output.get('done', {})
-                            if isinstance(done_data, dict) and 'text' in done_data:
-                                text = done_data['text']
-                                try:
-                                    return json.loads(text)
-                                except json.JSONDecodeError:
-                                    # Will continue to text extraction
-                                    pass
-            
-            # 5. Look for JSON in the standard "📄 Result: {...}" pattern
-            json_pattern = r'📄 Result:\s*(\{[\s\S]*?\})'
-            json_match = re.search(json_pattern, result_str)
-            if json_match:
-                try:
-                    return json.loads(json_match.group(1))
-                except json.JSONDecodeError:
-                    # Continue to next approach
-                    pass
-            
-            # 6. Try to find any JSON object in the text
-            json_pattern = r'(\{[\s\S]*?\})'
-            json_matches = re.findall(json_pattern, result_str)
-            
-            # Try each JSON match, starting with the longest (most complete)
-            json_matches.sort(key=len, reverse=True)
-            
-            for json_str in json_matches:
-                try:
-                    parsed = json.loads(json_str)
-                    # Verify this is our content data by checking for expected keys
-                    if 'title' in parsed or 'word_count' in parsed:
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
-            
-            # 7. Try direct text pattern matching as last resort
-            data = self._extract_content_from_text(result_str)
-            if data.get('title') or data.get('word_count'):
-                return data
-            
-            # 8. Fallback to default
-            logger.warning(f"Could not extract content data from agent result for URL '{url}'")
-            return self._create_default_content_data(url)
-            
-        except Exception as e:
-            logger.error(f"Error extracting content data for URL '{url}': {str(e)}")
-            return self._create_default_content_data(url)
-    
-    def _extract_content_from_text(self, text):
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON from ```json``` block in full string representation: {e}")
+                # Continue to next extraction methods
+
+        # Look for JSON in the standard "塘 Result: {...}" pattern (common from browser-use)
+        # This pattern might contain the JSON directly after the marker
+        json_result_match = re.search(r'塘 Result:\s*(\{[\s\S]*?\})', result_str, re.DOTALL)
+        if json_result_match:
+            json_str = json_result_match.group(1).strip()
+            try:
+                data = json.loads(json_str)
+                logger.debug("Extracted JSON from 塘 Result: pattern.")
+                # Basic validation
+                if isinstance(data, dict) and ('title' in data or 'word_count' in data or 'main_text_content' in data):
+                    return data
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON from 塘 Result: pattern: {e}")
+                # Fall through to next extraction methods
+
+
+        # Try finding any valid JSON object in the string as a last resort, prioritizing longer ones
+        # Use a cautious pattern to avoid matching partial structures
+        json_pattern_cautious = r'(\{.*?)\}' # Non-greedy match from { to }
+        potential_json_matches = re.findall(json_pattern_cautious, result_str, re.DOTALL)
+
+        # Attempt to "fix" incomplete JSON objects by adding a closing brace if it seems truncated
+        potential_json_matches = [match + '}' for match in potential_json_matches if not match.strip().endswith('}')] + [match for match in potential_json_matches if match.strip().endswith('}')]
+        potential_json_matches.sort(key=len, reverse=True) # Prioritize longer potential JSON
+
+        for json_candidate in potential_json_matches:
+            try:
+                json_str = json_candidate.strip()
+                data = json.loads(json_str)
+                # Basic validation: check for at least one core content field
+                if isinstance(data, dict) and ('title' in data or 'word_count' in data or 'main_text_content' in data or 'key_themes' in data or 'headings' in data):
+                    logger.debug("Extracted JSON from general regex match.")
+                    return data
+            except json.JSONDecodeError:
+                continue # Try next match
+
+        # If no valid JSON object was found after all attempts
+        logger.warning(f"Could not extract a valid JSON object from agent result for URL '{url}' after all attempts.")
+        return {} # Return empty dict if no valid JSON is found
+
+
+    def _create_default_content_data(self, url, error=None):
         """
-        Extract content data directly from text using patterns
-        
+        Create default content data structure when analysis fails. Includes new fields.
+
         Args:
-            text (str): Text to extract from
-            
+            url (str): URL that was analyzed.
+            error (str, optional): An error message if analysis failed.
+
         Returns:
-            dict: Extracted content data
+            dict: Default content data.
         """
-        result = {
-            "title": "",
-            "h1": "",
+        default_data = {
+            "title": f"Analysis Failed: {url}",
+            "h1": None,
             "headings": [],
+            "main_text_content": "",
             "word_count": 0,
             "content_type": "unknown",
             "key_themes": [],
-            "media_types": [],
-            "publication_date": None
-        }
-        
-        try:
-            # Extract title
-            title_match = re.search(r'"title":\s*"([^"]+)"', text)
-            if title_match:
-                result["title"] = title_match.group(1)
-            
-            # Extract H1
-            h1_match = re.search(r'"h1":\s*"([^"]+)"', text)
-            if h1_match:
-                result["h1"] = h1_match.group(1)
-            
-            # Extract word count
-            word_count_match = re.search(r'"word_count":\s*(\d+)', text)
-            if word_count_match:
-                result["word_count"] = int(word_count_match.group(1))
-            
-            # Extract content type
-            content_type_match = re.search(r'"content_type":\s*"([^"]+)"', text)
-            if content_type_match:
-                result["content_type"] = content_type_match.group(1)
-            
-            # Extract headings
-            headings_match = re.search(r'"headings":\s*\[(.*?)\]', text, re.DOTALL)
-            if headings_match:
-                headings_text = headings_match.group(1)
-                headings = re.findall(r'"([^"]+)"', headings_text)
-                result["headings"] = headings
-            
-            # Extract key themes
-            themes_match = re.search(r'"key_themes":\s*\[(.*?)\]', text, re.DOTALL)
-            if themes_match:
-                themes_text = themes_match.group(1)
-                themes = re.findall(r'"([^"]+)"', themes_text)
-                result["key_themes"] = themes
-            
-            # Extract media types
-            media_match = re.search(r'"media_types":\s*\[(.*?)\]', text, re.DOTALL)
-            if media_match:
-                media_text = media_match.group(1)
-                media = re.findall(r'"([^"]+)"', media_text)
-                result["media_types"] = media
-            
-            # Extract publication date
-            date_match = re.search(r'"publication_date":\s*"([^"]+)"', text)
-            if date_match:
-                result["publication_date"] = date_match.group(1)
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error extracting content from text: {str(e)}")
-            return result
-    
-    def _create_default_content_data(self, url):
-        """
-        Create default content data when analysis fails
-        
-        Args:
-            url (str): URL that was analyzed
-            
-        Returns:
-            dict: Default content data
-        """
-        return {
-            "title": f"Failed to extract from {url}",
-            "h1": "",
-            "headings": [],
-            "word_count": 0,
-            "content_type": "unknown",
-            "key_themes": [],
-            "media_types": ["text"],
+            "media_types": [], # Default to empty list now, not ["text"]
             "publication_date": None,
-            "error": "Content extraction failed"
+            "main_points_summary": None, # Default to None
+            "calls_to_action": [],
+            "readability_score": None, # Default readability to None
         }
-    
+        if error:
+            default_data["error"] = error
+        return default_data
+
+
     def _extract_common_themes_from_list(self, themes):
         """
-        Extract common themes from a list of themes
-        
+        Extract common themes from a list of themes - Keep existing logic.
+
         Args:
-            themes (list): List of themes
-            
+            themes (list): List of themes (strings).
+
         Returns:
-            list: Common themes
+            list: Top common themes.
         """
         # Count frequency of each theme
         theme_frequency = {}
         for theme in themes:
-            theme_frequency[theme] = theme_frequency.get(theme, 0) + 1
-        
+            if theme: # Ensure theme is not empty
+                theme_frequency[theme] = theme_frequency.get(theme, 0) + 1
+
         # Sort themes by frequency
         sorted_themes = sorted(theme_frequency.items(), key=lambda x: x[1], reverse=True)
-        
-        # Return the top themes
+
+        # Return the top themes (e.g., top 10 or adjust number)
         common_themes = [theme for theme, _ in sorted_themes[:10]]
-        
+
         return common_themes
-    
-    async def _extract_common_themes(self, content_analysis):
-        """
-        Extract common themes across all analyzed content
-        
-        Args:
-            content_analysis (dict): Dictionary of content analysis by URL
-            
-        Returns:
-            list: Common themes across all content
-        """
-        # Collect all key themes from all URLs
-        all_themes = []
-        for url, data in content_analysis.items():
-            all_themes.extend(data.get("key_themes", []))
-        
-        return self._extract_common_themes_from_list(all_themes)
-    
+
+    # Method _extract_common_themes is no longer used directly in analyze_content,
+    # the logic is integrated into the main loop. Keeping it might be useful
+    # if you wanted a separate step later.
+    # async def _extract_common_themes(self, content_analysis):
+    #     """
+    #     Extract common themes across all analyzed content
+    #     """
+    #     all_themes = []
+    #     for url, data in content_analysis.items():
+    #         all_themes.extend(data.get("key_themes", []))
+    #     return self._extract_common_themes_from_list(all_themes)
+
+
     def _clean_url(self, url):
         """
-        Clean and normalize URL
-        
+        Clean and normalize URL - Keep existing logic
+
         Args:
             url (str): URL to clean
-            
+
         Returns:
             str: Cleaned URL
         """
         # Remove quotes and extra characters
         if not url:
             return ""
-        
+
         url = str(url)
-        url = url.replace('"https":', 'https:').replace('"', '')
-        
+        # Handle common browser-use artifact seen in logs "https:" instead of "https://"
+        url = url.replace('"https":', 'https://').replace('"http":', 'http://')
+        url = url.replace('"', '') # Remove any leftover quotes
+
+
         # Ensure URL has proper scheme
-        if not url.startswith(('http://', 'https://')):
+        if url and not url.startswith(('http://', 'https://')):
             if url and not url.isspace():
-                url = 'https://' + url
-        
+                 # Check if it looks like a domain/path, assume https
+                if '.' in url: # Basic check for likely web address
+                     url = 'https://' + url
+                else:
+                     # Looks like malformed data, return empty
+                    logger.warning(f"URL '{url}' does not start with http/https and isn't a clear domain. Skipping.")
+                    return ""
+            else:
+                 # Empty or whitespace after cleaning
+                 return ""
+
+
+        # Basic validation that it looks somewhat like a URL after cleaning
+        if len(url) < 5 or '.' not in url:
+            logger.warning(f"Cleaned URL '{url}' looks invalid. Skipping.")
+            return ""
+
+
         return url.strip()
