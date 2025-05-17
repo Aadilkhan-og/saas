@@ -1,0 +1,26 @@
+2025-05-17 17:57:02,925 - browser_use.telemetry.service - INFO - Anonymized telemetry enabled. See https://docs.browser-use.com/development/telemetry for more information.
+2025-05-17 17:57:03,463 - keyword_research - INFO - Loaded environment variables from .env file
+2025-05-17 17:57:03,463 - keyword_research - WARNING - GOOGLE_API_KEY not found in environment. LLM features may not work correctly.
+2025-05-17 17:57:03,463 - keyword_research - INFO - InputHandler initialized
+2025-05-17 17:57:03,463 - keyword_research.gemini_client - ERROR - Google API key not found. Set GOOGLE_API_KEY environment variable.
+2025-05-17 17:57:03,463 - keyword_research.serp_collector - ERROR - Error initializing Gemini: Google API key not found
+2025-05-17 17:57:03,463 - keyword_research - INFO - SerpCollector initialized
+2025-05-17 17:57:03,463 - keyword_research.gemini_client - ERROR - Google API key not found. Set GOOGLE_API_KEY environment variable.
+2025-05-17 17:57:03,463 - keyword_research.content_analyzer - ERROR - Error initializing Gemini: Google API key not found
+2025-05-17 17:57:03,463 - keyword_research - INFO - ContentAnalyzer initialized
+2025-05-17 17:57:03,471 - keyword_research.gemini_client - ERROR - Google API key not found. Set GOOGLE_API_KEY environment variable.
+2025-05-17 17:57:03,471 - keyword_research.keyword_processor - ERROR - Error initializing Gemini: Google API key not found
+2025-05-17 17:57:03,471 - keyword_research - INFO - KeywordProcessor initialized
+2025-05-17 17:57:03,471 - keyword_research.gemini_client - ERROR - Google API key not found. Set GOOGLE_API_KEY environment variable.
+2025-05-17 17:57:03,471 - keyword_research.insight_generator - ERROR - Error initializing Gemini: Google API key not found
+2025-05-17 17:57:03,471 - keyword_research - INFO - InsightGenerator initialized
+2025-05-17 17:57:03,473 - keyword_research - INFO - ResultRenderer initialized
+2025-05-17 17:57:03,474 - keyword_research - INFO - Starting Deep Keyword Research API server...
+2025-05-17 17:57:03,490 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2025-05-17 17:57:03,490 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-05-17 17:57:03,496 - werkzeug - INFO -  * Restarting with stat
+2025-05-17 17:58:13,236 - werkzeug - INFO -  * Restarting with stat
+2025-05-17 17:59:21,207 - werkzeug - INFO -  * Restarting with stat
+2025-05-17 17:59:29,428 - werkzeug - INFO -  * Restarting with stat
+2025-05-17 17:59:34,514 - werkzeug - INFO -  * Restarting with stat

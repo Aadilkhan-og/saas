@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Keyword Research Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        /* Optional: Add some custom styles if needed, e.g., for score bars */
+        .score-bar {
+            height: 100%;
+        }
+         /* Style for expandable sections */
+        .expandable-header {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .expandable-content {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e5e7eb; /* gray-200 */
+        }
+        .expandable-header .arrow {
+            transition: transform 0.2s ease-in-out;
+        }
+        .expandable-header.expanded .arrow {
+            transform: rotate(90deg);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Deep Keyword Research Tool</h1>
+            <p class="text-lg text-gray-600">Discover deep insights into search intent, competitive landscape, and content opportunities</p>
+        </header>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-10">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">Input Keywords</h2>
+            <form id="keywordForm" class="space-y-6">
+                <div>
+                    <label for="seedKeyword" class="block text-gray-700 font-semibold mb-2">Seed Keyword <span class="text-red-500">*</span></label>
+                    <input type="text" id="seedKeyword" name="seed_keyword" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600" required placeholder="Enter your main keyword (e.g., 'home fitness equipment')">
+                </div>
+
+                <div>
+                    <label for="secondaryKeywords" class="block text-gray-700 font-semibold mb-2">Secondary Keywords <span class="text-gray-500 font-normal">(optional, comma-separated)</span></label>
+                    <input type="text" id="secondaryKeywords" name="secondary_keywords" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600" placeholder="Enter related keywords (e.g., 'treadmill review, yoga mat guide')">
+                </div>
+
+                <div>
+                    <label for="industry" class="block text-gray-700 font-semibold mb-2">Industry/Niche <span class="text-gray-500 font-normal">(optional)</span></label>
+                    <input type="text" id="industry" name="industry" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600" placeholder="E.g., 'fitness', 'software', 'finance'">
+                </div>
+
+                <div>
+                    <label for="competitorUrls" class="block text-gray-700 font-semibold mb-2">Competitor URLs <span class="text-gray-500 font-normal">(optional, comma-separated)</span></label>
+                    <input type="text" id="competitorUrls" name="competitor_urls" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600" placeholder="Enter competitor URLs (e.g., 'https://competitor1.com, https://competitor2.com')">
+                </div>
+
+                <div class="pt-4">
+                    <button type="submit" class="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 transition duration-200 ease-in-out">
+                        Run Deep Research
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div id="loadingState" class="hidden bg-blue-100 rounded-xl shadow-lg p-8 mb-10 text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600 mx-auto mb-6"></div>
+            <p class="text-blue-800 text-xl font-semibold">Analyzing keywords and gathering insights...</p>
+            <p class="text-blue-700 text-md mt-2">This may take a few minutes depending on the number of keywords and URLs.</p>
+        </div>
+
+         <div id="errorState" class="hidden bg-red-100 rounded-xl shadow-lg p-8 mb-10 text-center">
+            <h3 class="text-red-800 text-xl font-semibold mb-4">Error</h3>
+            <p id="errorMessage" class="text-red-700 text-md"></p>
+             <p class="text-red-600 text-sm mt-4">Please check the server logs for more details or try adjusting your input.</p>
+        </div>
+
+
+        <div id="resultsContainer" class="hidden">
+            <div class="bg-white rounded-xl shadow-lg p-8 mb-10">
+                <h2 id="resultsTitle" class="text-3xl font-bold text-gray-800 mb-4"></h2>
+                <p id="resultsDate" class="text-gray-600 mb-6"></p>
+
+                <div class="bg-blue-50 p-6 rounded-lg border border-blue-100 mb-8">
+                    <h3 class="text-blue-800 text-xl font-semibold mb-3">Summary</h3>
+                    <p id="insightSummary" class="text-blue-900 leading-relaxed"></p>
+                </div>
+
+                <div id="topOpportunitiesSection" class="mb-10">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-4">Top Opportunities</h3>
+                    <div id="topOpportunitiesList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        </div>
+                     <p id="noTopOpportunities" class="text-gray-500 italic mt-4 hidden">No top opportunities identified based on the analysis.</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+                    <div class="lg:col-span-2 bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Keyword Analysis</h2>
+
+                        <div id="intentDistributionSection" class="mb-8">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Intent Distribution</h3>
+                            <div id="intentDistributionChart" class="flex items-end space-x-6 h-40">
+                                </div>
+                             <p id="noIntentDistribution" class="text-gray-500 italic mt-4 hidden">Intent distribution data not available.</p>
+                        </div>
+
+                         <div id="keywordOpportunitiesSection" class="mb-8">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Top Keywords by Opportunity Score</h3>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 rounded-lg overflow-hidden">
+                                    <thead class="bg-gray-100">
+                                        <tr>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Keyword</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Intent</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Score</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Difficulty</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Opportunity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="keywordOpportunitiesTableBody" class="bg-white divide-y divide-gray-200">
+                                        </tbody>
+                                </table>
+                            </div>
+                             <p id="noKeywordOpportunities" class="text-gray-500 italic mt-4 hidden">No high opportunity keywords identified.</p>
+                        </div>
+
+                        <div id="questionKeywordsSection" class="mb-8">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Question-Based Keywords (People Also Ask)</h3>
+                            <ul id="questionKeywordsList" class="list-disc list-inside space-y-2 text-gray-700">
+                                </ul>
+                             <p id="noQuestionKeywords" class="text-gray-500 italic hidden">No question keywords found in SERP analysis.</p>
+                        </div>
+
+                         <div id="keywordClustersSection">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Keyword Clusters</h3>
+                            <div id="keywordClustersList" class="space-y-4">
+                                </div>
+                             <p id="noKeywordClusters" class="text-gray-500 italic hidden">No keyword clusters identified.</p>
+                        </div>
+
+                    </div>
+
+                     <div class="lg:col-span-1 bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Competitive Landscape Overview</h2>
+
+                        <div id="topCompetitorsSection" class="mb-8">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Top Ranking Domains</h3>
+                            <ul id="topCompetitorsList" class="space-y-3 text-gray-700">
+                                </ul>
+                             <p id="noTopCompetitors" class="text-gray-500 italic hidden">No top competitors identified from SERP analysis.</p>
+                        </div>
+
+                         <div id="competitorContentSummarySection" class="mb-8">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">Competitor Content Summary</h3>
+                             <div class="space-y-4">
+                                <div class="bg-gray-100 p-4 rounded-md">
+                                    <p class="text-sm text-gray-600 font-medium">Average Word Count (Analyzed Pages)</p>
+                                    <p id="avgWordCount" class="text-2xl font-bold text-gray-900">--</p>
+                                </div>
+                                <div class="bg-gray-100 p-4 rounded-md">
+                                     <p class="text-sm text-gray-600 font-medium">Dominant Content Type (Analyzed Pages)</p>
+                                    <p id="dominantContentType" class="text-2xl font-bold text-gray-900">--</p>
+                                </div>
+                             </div>
+
+                             <h4 class="text-lg font-semibold text-gray-700 mt-6 mb-3">Common Themes (Analyzed Pages)</h4>
+                             <div id="commonThemesList" class="flex flex-wrap gap-2">
+                                 </div>
+                              <p id="noCommonThemes" class="text-gray-500 italic hidden">No common themes identified from competitor content.</p>
+                        </div>
+
+                         <div id="serpFeaturesSection">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-4">SERP Features Observed</h3>
+                            <ul id="serpFeaturesList" class="list-disc list-inside space-y-2 text-gray-700">
+                                </ul>
+                             <p id="noSerpFeatures" class="text-gray-500 italic hidden">No notable SERP features observed.</p>
+                         </div>
+                    </div>
+                </div>
+
+                <div id="detailedSerpSection" class="bg-white rounded-xl shadow-lg p-6 mb-10">
+                     <h2 class="text-2xl font-bold text-gray-800 mb-4">Detailed SERP Results</h2>
+                     <p id="detailedSerpKeyword" class="text-gray-600 italic mb-6"></p>
+
+                      <div id="featuredSnippetSection" class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 mb-6 hidden">
+                          <h3 class="text-yellow-800 text-xl font-semibold mb-3">Featured Snippet</h3>
+                          <p id="featuredSnippetContent" class="text-yellow-900 mb-3"></p>
+                          <p id="featuredSnippetSource" class="text-sm text-yellow-800 italic"></p>
+                      </div>
+
+                      <div id="paaSection" class="mb-6">
+                          <h3 class="text-xl font-semibold text-gray-700 mb-4">People Also Ask</h3>
+                           <ul id="paaList" class="list-disc list-inside space-y-2 text-gray-700">
+                               </ul>
+                            <p id="noPaasList" class="text-gray-500 italic hidden">No "People Also Ask" questions found for this keyword.</p>
+                      </div>
+
+                       <div id="relatedSearchesSection" class="mb-6">
+                          <h3 class="text-xl font-semibold text-gray-700 mb-4">Related Searches</h3>
+                           <ul id="relatedSearchesList" class="list-disc list-inside space-y-2 text-gray-700">
+                               </ul>
+                           <p id="noRelatedSearchesList" class="text-gray-500 italic hidden">No "Related Searches" found for this keyword.</p>
+                      </div>
+
+
+                     <div id="topOrganicResultsSection">
+                         <h3 class="text-xl font-semibold text-gray-700 mb-4">Top Organic Results</h3>
+                          <div id="topOrganicResultsList" class="space-y-6">
+                              </div>
+                           <p id="noTopOrganicResults" class="text-gray-500 italic mt-4 hidden">No top organic results found for this keyword.</p>
+                     </div>
+                 </div>
+
+                 <div id="detailedContentAnalysisSection" class="bg-white rounded-xl shadow-lg p-6 mb-10">
+                      <h2 class="text-2xl font-bold text-gray-800 mb-6">Detailed Competitor Content Analysis</h2>
+                       <div id="detailedContentAnalysisList" class="space-y-8">
+                           </div>
+                        <p id="noDetailedContentAnalysis" class="text-gray-500 italic hidden">No detailed competitor content analysis available (check if URLs were analyzed).</p>
+                 </div>
+
+
+                <div id="contentStrategySection" class="bg-white rounded-xl shadow-lg p-6 mb-10">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">Content Strategy Recommendations</h2>
+
+                    <div class="space-y-6 mb-8"> <h3 class="text-xl font-semibold text-gray-700 mb-4">Identified Opportunities</h3>
+                         <div id="contentOpportunitiesItems" class="space-y-4">
+                             </div>
+                         <p id="noContentOpportunities" class="text-gray-500 italic hidden">No specific content opportunities identified based on the analysis.</p>
+                    </div>
+
+                    <div class="space-y-6"> <h3 class="text-xl font-semibold text-gray-700 mb-4">General Recommendations</h3>
+                         <div id="contentRecommendationsItems" class="space-y-4">
+                             </div>
+                          <p id="noContentRecommendations" class="text-gray-500 italic hidden">No general content recommendations generated.</p>
+                    </div>
+
+                </div>
+
+
+                <div id="nextStepsSection" class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Recommended Next Steps</h2>
+                    <div id="nextStepsList" class="space-y-6">
+                        </div>
+                     <p id="noNextSteps" class="text-gray-500 italic hidden">No next steps recommended.</p>
+                </div>
+
+                <div id="metadataSection" class="mt-10 text-sm text-gray-500 text-center">
+                     </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('keywordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Hide previous states and show loading
+            document.getElementById('resultsContainer').classList.add('hidden');
+            document.getElementById('errorState').classList.add('hidden');
+            document.getElementById('loadingState').classList.remove('hidden');
+
+            // Clear previous results (Dashboard sections)
+            clearDashboard();
+
+            // Get form data
+            const formData = new FormData(e.target);
+            const formObject = {};
+
+            formData.forEach((value, key) => {
+                // Process comma-separated values
+                if (key === 'secondary_keywords' || key === 'competitor_urls') {
+                    formObject[key] = value ? value.split(',').map(item => item.trim()).filter(item => item !== '') : [];
+                } else {
+                    formObject[key] = value.trim();
+                }
+            });
+
+            console.log('Sending data:', formObject);
+
+            try {
+                // Send request to the API
+                const response = await fetch('/api/research', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formObject)
+                });
+
+                // Handle non-OK responses (e.g., 500 errors from Flask)
+                if (!response.ok) {
+                     // Attempt to parse JSON body for backend error details
+                    let errorDetails = 'Unknown API error';
+                    try {
+                       const errorData = await response.json();
+                       console.error('API Error Response Body:', errorData);
+                       errorDetails = errorData.error || errorData.message || JSON.stringify(errorData);
+                    } catch (jsonError) {
+                       // If response body isn't JSON, use status text
+                       errorDetails = `API request failed with status ${response.status}: ${response.statusText}`;
+                       console.error('API Error (Non-JSON response):', response.status, response.statusText);
+                    }
+                    throw new Error(errorDetails);
+                }
+
+                const data = await response.json();
+                console.log('API Response:', data);
+
+                // Hide loading
+                document.getElementById('loadingState').classList.add('hidden');
+
+                // Check if the response contains an error flag from the backend logic (different from HTTP error)
+                if (data.error) {
+                     document.getElementById('errorMessage').textContent = data.error;
+                     document.getElementById('errorState').classList.remove('hidden');
+                      // Optionally display partial data if available for debugging
+                     if (data.partial_serp_data || data.partial_competitor_data || data.partial_keyword_analysis || data.partial_insights) {
+                          console.log("Partial data received:", {
+                               partial_serp_data: data.partial_serp_data,
+                               partial_competitor_data: data.partial_competitor_data,
+                               partial_keyword_analysis: data.partial_keyword_analysis,
+                               partial_insights: data.partial_insights
+                          });
+                           // You could add a section to display this partial data on the page for advanced users
+                     }
+
+                } else {
+                    // Render the results
+                    renderResults(data);
+
+                    // Show results
+                    document.getElementById('resultsContainer').classList.remove('hidden');
+
+                    // Scroll to results
+                    document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth' });
+                }
+
+
+            } catch (error) {
+                console.error('Fetch or API Error:', error);
+
+                // Hide loading
+                document.getElementById('loadingState').classList.add('hidden');
+
+                // Show error state
+                document.getElementById('errorMessage').textContent = error.message || 'An unexpected error occurred during the request.';
+                document.getElementById('errorState').classList.remove('hidden');
+            }
+        });
+
+        function clearDashboard() {
+             // Clear all dynamic content areas
+            document.getElementById('resultsTitle').textContent = '';
+            document.getElementById('resultsDate').textContent = '';
+            document.getElementById('insightSummary').textContent = '';
+            document.getElementById('topOpportunitiesList').innerHTML = '';
+            document.getElementById('intentDistributionChart').innerHTML = '';
+            document.getElementById('keywordOpportunitiesTableBody').innerHTML = '';
+            document.getElementById('questionKeywordsList').innerHTML = '';
+            document.getElementById('keywordClustersList').innerHTML = '';
+            document.getElementById('topCompetitorsList').innerHTML = '';
+            document.getElementById('avgWordCount').textContent = '--';
+            document.getElementById('dominantContentType').textContent = '--';
+            document.getElementById('commonThemesList').innerHTML = '';
+            document.getElementById('serpFeaturesList').innerHTML = '';
+            // Ensure correct IDs are cleared for Content Strategy sections
+            document.getElementById('contentOpportunitiesItems').innerHTML = '';
+            document.getElementById('contentRecommendationsItems').innerHTML = '';
+
+            document.getElementById('nextStepsList').innerHTML = '';
+            document.getElementById('metadataSection').innerHTML = '';
+            document.getElementById('detailedSerpKeyword').textContent = '';
+            document.getElementById('featuredSnippetContent').textContent = '';
+            document.getElementById('featuredSnippetSource').textContent = '';
+             document.getElementById('paaList').innerHTML = '';
+             document.getElementById('relatedSearchesList').innerHTML = '';
+             document.getElementById('topOrganicResultsList').innerHTML = '';
+             document.getElementById('detailedContentAnalysisList').innerHTML = '';
+
+
+            // Hide sections that might be empty
+             document.getElementById('topOpportunitiesSection').classList.add('hidden');
+             document.getElementById('intentDistributionSection').classList.add('hidden');
+             document.getElementById('keywordOpportunitiesSection').classList.add('hidden');
+             document.getElementById('questionKeywordsSection').classList.add('hidden');
+             document.getElementById('keywordClustersSection').classList.add('hidden');
+             document.getElementById('topCompetitorsSection').classList.add('hidden');
+             document.getElementById('competitorContentSummarySection').classList.add('hidden');
+             document.getElementById('serpFeaturesSection').classList.add('hidden');
+             document.getElementById('detailedSerpSection').classList.add('hidden');
+             document.getElementById('detailedContentAnalysisSection').classList.add('hidden');
+             document.getElementById('contentStrategySection').classList.add('hidden'); // Keep this visible initially, hide later if no data
+             document.getElementById('nextStepsSection').classList.add('hidden');
+             document.getElementById('metadataSection').classList.add('hidden');
+             document.getElementById('featuredSnippetSection').classList.add('hidden');
+
+
+            // Hide all "No data" messages
+            const noDataMessages = document.querySelectorAll('[id^="no"]'); // Find all elements whose ID starts with "no"
+            noDataMessages.forEach(el => el.classList.add('hidden'));
+        }
+
+
+        function renderResults(data) {
+            // 1. Summary
+            document.getElementById('resultsTitle').textContent = data.summary.title;
+            document.getElementById('resultsDate').textContent = `Analysis Date: ${data.summary.date} • ${data.summary.keyword_count} Keywords Analyzed`;
+            document.getElementById('insightSummary').textContent = data.summary.insight_summary;
+
+            // Top Opportunities
+            const topOpportunitiesList = document.getElementById('topOpportunitiesList');
+            if (data.summary.top_opportunities && data.summary.top_opportunities.length > 0) {
+                topOpportunitiesList.innerHTML = data.summary.top_opportunities.map(opportunity => `
+                    <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                        <span class="inline-block px-2 py-1 text-xs font-medium rounded-full mb-2 ${
+                            opportunity.type === 'content' ? 'bg-green-100 text-green-800' :
+                            opportunity.type === 'keyword' ? 'bg-purple-100 text-purple-800' :
+                            'bg-yellow-100 text-yellow-800'
+                        }">${opportunity.type ? opportunity.type.replace('_', ' ') : 'opportunity'}</span>
+                        <h4 class="font-semibold text-gray-900 mb-1">${opportunity.title || 'Untitled Opportunity'}</h4>
+                        <p class="text-sm text-gray-600">${opportunity.description || 'No description provided.'}</p>
+                    </div>
+                `).join('');
+                 document.getElementById('topOpportunitiesSection').classList.remove('hidden');
+                 document.getElementById('noTopOpportunities').classList.add('hidden');
+            } else {
+                 topOpportunitiesList.innerHTML = '';
+                 document.getElementById('topOpportunitiesSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noTopOpportunities').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // 2. Keyword Analysis
+            // Intent Distribution
+            const intentDistributionChart = document.getElementById('intentDistributionChart');
+            intentDistributionChart.innerHTML = ''; // Clear previous chart
+            if (data.intent_analysis.distribution && Object.keys(data.intent_analysis.distribution).length > 0) {
+                 Object.entries(data.intent_analysis.distribution).forEach(([intent, value]) => {
+                    const percentage = Math.round(value * 100);
+                    const color = getIntentColor(intent); // Function to get color based on intent
+                    intentDistributionChart.innerHTML += `
+                        <div class="flex flex-col items-center h-full justify-end">
+                            <div class="w-8 bg-gray-200 rounded-t-md relative flex-grow" style="height: ${100 - percentage}%"></div>
+                            <div class="w-8 ${color} rounded-t-md relative" style="height: ${percentage}%"></div>
+                            <span class="text-xs text-gray-600 mt-2 capitalize">${intent}</span>
+                            <span class="text-xs font-medium text-gray-800">${percentage}%</span>
+                        </div>
+                    `;
+                 });
+                 document.getElementById('intentDistributionSection').classList.remove('hidden');
+                 document.getElementById('noIntentDistribution').classList.add('hidden');
+            } else {
+                 intentDistributionChart.innerHTML = '';
+                 document.getElementById('intentDistributionSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noIntentDistribution').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // Keyword Opportunities Table
+            const keywordOpportunitiesTableBody = document.getElementById('keywordOpportunitiesTableBody');
+            if (data.keywords.opportunities && data.keywords.opportunities.length > 0) {
+                keywordOpportunitiesTableBody.innerHTML = data.keywords.opportunities.map(keyword => {
+                    const intentColorClass = getIntentBadgeColor(keyword.intent); // Function to get badge color
+                    const scoreColor = getScoreColor(keyword.score); // Function to get score bar color
+                    return `
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-gray-900">${keyword.keyword}</td>
+                            <td class="px-6 py-4">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${intentColorClass}">
+                                    ${keyword.intent || 'unknown'}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-900">
+                                <div class="flex items-center">
+                                    <div class="w-20 h-3 bg-gray-200 rounded-full overflow-hidden">
+                                        <div class="score-bar ${scoreColor}" style="width: ${keyword.score}%"></div>
+                                    </div>
+                                    <span class="ml-2 text-xs text-gray-600">${Math.round(keyword.score)}</span>
+                                </div>
+                            </td>
+                             <td class="px-6 py-4 text-sm text-gray-900">${Math.round(keyword.difficulty)}</td>
+                             <td class="px-6 py-4 text-sm text-gray-900">${Math.round(keyword.opportunity)}</td>
+                        </tr>
+                    `;
+                }).join('');
+                 document.getElementById('keywordOpportunitiesSection').classList.remove('hidden');
+                 document.getElementById('noKeywordOpportunities').classList.add('hidden');
+            } else {
+                 keywordOpportunitiesTableBody.innerHTML = '';
+                 document.getElementById('keywordOpportunitiesSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noKeywordOpportunities').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // Question Keywords
+            const questionKeywordsList = document.getElementById('questionKeywordsList');
+            if (data.keywords.questions && data.keywords.questions.length > 0) {
+                questionKeywordsList.innerHTML = data.keywords.questions.map(q => `<li>${q}</li>`).join('');
+                 document.getElementById('questionKeywordsSection').classList.remove('hidden');
+                 document.getElementById('noQuestionKeywords').classList.add('hidden');
+            } else {
+                 questionKeywordsList.innerHTML = '';
+                 document.getElementById('questionKeywordsSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noQuestionKeywords').classList.remove('hidden'); // Show "No data" message
+            }
+
+            // Keyword Clusters
+            const keywordClustersList = document.getElementById('keywordClustersList');
+            if (data.intent_analysis.clusters && data.intent_analysis.clusters.length > 0) {
+                 keywordClustersList.innerHTML = data.intent_analysis.clusters.map(cluster => {
+                    const intentColorClass = getIntentBadgeColor(cluster.intent);
+                    return `
+                        <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                            <h4 class="font-semibold text-gray-900 mb-2 capitalize">${cluster.topic || 'Untitled Cluster'}</h4>
+                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${intentColorClass} mb-3">
+                                    ${cluster.intent || 'unknown'} Intent
+                             </span>
+                            <div class="flex flex-wrap gap-2">
+                                ${cluster.keywords.map(kw => `<span class="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">${kw}</span>`).join('')}
+                            </div>
+                        </div>
+                    `;
+                 }).join('');
+                 document.getElementById('keywordClustersSection').classList.remove('hidden');
+                 document.getElementById('noKeywordClusters').classList.add('hidden');
+            } else {
+                 keywordClustersList.innerHTML = '';
+                 document.getElementById('keywordClustersSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noKeywordClusters').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // 3. Competitive Landscape Overview
+            // Top Competitors
+            const topCompetitorsList = document.getElementById('topCompetitorsList');
+            if (data.serp_insights.top_competitors && data.serp_insights.top_competitors.length > 0) {
+                topCompetitorsList.innerHTML = data.serp_insights.top_competitors.map(comp => `
+                    <li class="flex justify-between items-center border-b border-gray-100 pb-2 last:border-b-0 last:pb-0">
+                        <span class="text-gray-800">${comp.domain}</span>
+                        <span class="text-sm font-medium text-gray-600">${comp.percentage}%</span>
+                    </li>
+                `).join('');
+                 document.getElementById('topCompetitorsSection').classList.remove('hidden');
+                 document.getElementById('noTopCompetitors').classList.add('hidden');
+            } else {
+                 topCompetitorsList.innerHTML = '';
+                 document.getElementById('topCompetitorsSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noTopCompetitors').classList.remove('hidden'); // Show "No data" message
+            }
+
+            // Competitor Content Summary
+            document.getElementById('avgWordCount').textContent = data.content_strategy.competitor_content.word_count_avg > 0 ? `${data.content_strategy.competitor_content.word_count_avg} words` : '--';
+            const dominantContentType = data.content_strategy.competitor_content.content_types && data.content_strategy.competitor_content.content_types.length > 0 ? data.content_strategy.competitor_content.content_types[0].type : '--';
+             document.getElementById('dominantContentType').textContent = dominantContentType;
+
+            const commonThemesList = document.getElementById('commonThemesList');
+            if (data.content_strategy.competitor_content.themes && data.content_strategy.competitor_content.themes.length > 0) {
+                 commonThemesList.innerHTML = data.content_strategy.competitor_content.themes.map(theme => `
+                     <span class="px-3 py-1 bg-gray-200 text-gray-800 text-sm rounded-full">${theme}</span>
+                 `).join('');
+                 document.getElementById('noCommonThemes').classList.add('hidden');
+            } else {
+                 commonThemesList.innerHTML = '';
+                 document.getElementById('noCommonThemes').classList.remove('hidden'); // Show "No data" message
+            }
+             document.getElementById('competitorContentSummarySection').classList.remove('hidden'); // Always show summary section
+
+
+            // SERP Features
+            const serpFeaturesList = document.getElementById('serpFeaturesList');
+            if (data.serp_insights.features && data.serp_insights.features.length > 0) {
+                 serpFeaturesList.innerHTML = data.serp_insights.features.map(feature => `
+                     <li>
+                         <span class="font-medium">${feature.feature.replace('_', ' ')}:</span> ${feature.description}
+                          ${feature.strategy ? `<p class="text-sm text-gray-600 italic mt-1">Strategy: ${feature.strategy}</p>` : ''}
+                     </li>
+                 `).join('');
+                 document.getElementById('serpFeaturesSection').classList.remove('hidden');
+                 document.getElementById('noSerpFeatures').classList.add('hidden');
+            } else {
+                 serpFeaturesList.innerHTML = '';
+                 document.getElementById('serpFeaturesSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noSerpFeatures').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // --- NEW: DETAILED SERP RESULTS ---
+            const detailedSerpSection = document.getElementById('detailedSerpSection');
+            const detailedSerpKeyword = document.getElementById('detailedSerpKeyword');
+            const featuredSnippetSection = document.getElementById('featuredSnippetSection');
+            const featuredSnippetContent = document.getElementById('featuredSnippetContent');
+            const featuredSnippetSource = document.getElementById('featuredSnippetSource');
+            const paaList = document.getElementById('paaList');
+            const relatedSearchesList = document.getElementById('relatedSearchesList');
+            const topOrganicResultsList = document.getElementById('topOrganicResultsList');
+
+            if (data.detailed_serp_results) {
+                detailedSerpSection.classList.remove('hidden');
+                detailedSerpKeyword.textContent = `For Keyword: "${data.detailed_serp_results.keyword || 'N/A'}"`;
+
+                 // Featured Snippet
+                 if (data.detailed_serp_results.featured_snippet) {
+                     featuredSnippetSection.classList.remove('hidden');
+                     featuredSnippetContent.textContent = data.detailed_serp_results.featured_snippet.content || 'N/A';
+                     featuredSnippetSource.innerHTML = `Source: <a href="${data.detailed_serp_results.featured_snippet.url}" target="_blank" class="text-blue-600 hover:underline">${data.detailed_serp_results.featured_snippet.title || data.detailed_serp_results.featured_snippet.url}</a>`;
+                 } else {
+                     featuredSnippetSection.classList.add('hidden');
+                 }
+
+                // PAA
+                if (data.detailed_serp_results.paa_questions && data.detailed_serp_results.paa_questions.length > 0) {
+                    paaList.innerHTML = data.detailed_serp_results.paa_questions.map(q => `<li>${q}</li>`).join('');
+                    document.getElementById('paaSection').classList.remove('hidden');
+                    document.getElementById('noPaasList').classList.add('hidden');
+                } else {
+                    paaList.innerHTML = '';
+                     document.getElementById('paaSection').classList.remove('hidden'); // Keep section
+                     document.getElementById('noPaasList').classList.remove('hidden'); // Show "No data" message
+                }
+
+                 // Related Searches
+                if (data.detailed_serp_results.related_searches && data.detailed_serp_results.related_searches.length > 0) {
+                    relatedSearchesList.innerHTML = data.detailed_serp_results.related_searches.map(rs => `<li>${rs}</li>`).join('');
+                    document.getElementById('relatedSearchesSection').classList.remove('hidden');
+                    document.getElementById('noRelatedSearchesList').classList.add('hidden');
+                } else {
+                    relatedSearchesList.innerHTML = '';
+                     document.getElementById('relatedSearchesSection').classList.remove('hidden'); // Keep section
+                     document.getElementById('noRelatedSearchesList').classList.remove('hidden'); // Show "No data" message
+                }
+
+
+                // Top Organic Results
+                 if (data.detailed_serp_results.results && data.detailed_serp_results.results.length > 0) {
+                     topOrganicResultsList.innerHTML = data.detailed_serp_results.results.map(res => `
+                         <div class="border p-4 rounded-md bg-gray-50">
+                             <h4 class="text-lg font-semibold text-blue-800 hover:underline"><a href="${res.url}" target="_blank">${res.title || res.url}</a></h4>
+                             <p class="text-green-700 text-sm">${res.url}</p>
+                             <p class="text-gray-800 text-sm mt-1">${res.description || 'No description available.'}</p>
+                         </div>
+                     `).join('');
+                     document.getElementById('topOrganicResultsSection').classList.remove('hidden');
+                     document.getElementById('noTopOrganicResults').classList.add('hidden');
+                 } else {
+                     topOrganicResultsList.innerHTML = '';
+                     document.getElementById('topOrganicResultsSection').classList.remove('hidden'); // Keep section
+                     document.getElementById('noTopOrganicResults').classList.remove('hidden'); // Show "No data" message
+                 }
+
+
+            } else {
+                detailedSerpSection.classList.add('hidden'); // Hide entire section if no detailed SERP data
+            }
+
+
+            // --- NEW: DETAILED CONTENT ANALYSIS ---
+             const detailedContentAnalysisSection = document.getElementById('detailedContentAnalysisSection');
+             const detailedContentAnalysisList = document.getElementById('detailedContentAnalysisList');
+
+             if (data.detailed_content_analysis && data.detailed_content_analysis.length > 0) {
+                  detailedContentAnalysisSection.classList.remove('hidden');
+                  detailedContentAnalysisList.innerHTML = data.detailed_content_analysis.map((item, index) => {
+                       const analysis = item.analysis;
+                       const url = item.url;
+                       const themes = analysis.key_themes && analysis.key_themes.length > 0 ? analysis.key_themes.map(t => `<span class="px-2 py-0.5 bg-gray-200 text-gray-800 text-xs rounded-full">${t}</span>`).join(' ') : 'N/A';
+                       const mediaTypes = analysis.media_types && analysis.media_types.length > 0 ? analysis.media_types.join(', ') : 'N/A';
+                       const headings = analysis.headings && analysis.headings.length > 0 ? analysis.headings.map(h => `<li>${h}</li>`).join('') : '<li>N/A</li>';
+
+
+                       return `
+                           <div class="bg-white rounded-lg shadow-md p-6">
+                               <div class="expandable-header text-lg font-semibold text-gray-800 mb-4" onclick="toggleExpandable(this)">
+                                   <span class="arrow inline-block mr-2">></span> Analysis for: <a href="${url}" target="_blank" class="text-blue-600 hover:underline ml-2">${analysis.title || url}</a>
+                               </div>
+                               <div class="expandable-content">
+                                   <p class="text-gray-700 mb-2"><strong>URL:</strong> <a href="${url}" target="_blank" class="text-blue-600 hover:underline">${url}</a></p>
+                                   <p class="text-gray-700 mb-2"><strong>H1:</strong> ${analysis.h1 || 'N/A'}</p>
+                                   <p class="text-gray-700 mb-2"><strong>Word Count:</strong> ${analysis.word_count > 0 ? analysis.word_count : 'N/A'}</p>
+                                   <p class="text-gray-700 mb-2"><strong>Content Type:</strong> ${analysis.content_type || 'N/A'}</p>
+                                   <p class="text-gray-700 mb-2"><strong>Publication Date:</strong> ${analysis.publication_date || 'N/A'}</p>
+                                   <p class="text-gray-700 mb-2"><strong>Media Types:</strong> ${mediaTypes}</p>
+
+                                   <div class="mt-4">
+                                       <h4 class="font-semibold text-gray-800 mb-2">Key Themes:</h4>
+                                       <div class="flex flex-wrap gap-2">${themes}</div>
+                                   </div>
+
+                                    <div class="mt-4">
+                                       <h4 class="font-semibold text-gray-800 mb-2">Subheadings (H2/H3):</h4>
+                                       <ul class="list-disc list-inside text-gray-700 space-y-1">${headings}</ul>
+                                   </div>
+                               </div>
+                           </div>
+                       `;
+                  }).join('');
+                   document.getElementById('noDetailedContentAnalysis').classList.add('hidden');
+             } else {
+                 detailedContentAnalysisSection.classList.add('hidden'); // Hide the whole section
+                  document.getElementById('noDetailedContentAnalysis').classList.remove('hidden'); // Show "No data" message (in case the section gets shown but has no data)
+             }
+
+
+            // 4. Content Strategy Recommendations
+             document.getElementById('contentStrategySection').classList.remove('hidden'); // Ensure section is visible
+
+            // Identified Opportunities
+            const contentOpportunitiesItems = document.getElementById('contentOpportunitiesItems');
+            if (data.content_strategy.opportunities && data.content_strategy.opportunities.length > 0) {
+                // CORRECTED: Updated coloring logic to match backend opportunity types
+                contentOpportunitiesItems.innerHTML = data.content_strategy.opportunities.map(opportunity => `
+                    <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                        <span class="inline-block px-2 py-1 text-xs font-medium rounded-full mb-2 ${
+                            opportunity.type === 'question_content' ? 'bg-blue-100 text-blue-800' :
+                            opportunity.type === 'content_type_gap' ? 'bg-green-100 text-green-800' :
+                            opportunity.type === 'intent_gap' ? 'bg-purple-100 text-purple-800' :
+                            opportunity.type === 'serp_feature_opportunity' ? 'bg-yellow-100 text-yellow-800' :
+                            opportunity.type === 'freshness_opportunity' ? 'bg-teal-100 text-teal-800' :
+                            opportunity.type === 'depth_opportunity' ? 'bg-indigo-100 text-indigo-800' :
+                             opportunity.type === 'media_opportunity' ? 'bg-pink-100 text-pink-800' :
+                            'bg-gray-100 text-gray-800' // Default color
+                        }">${opportunity.type ? opportunity.type.replace(/_/g, ' ') : 'opportunity'}</span>
+                        <h4 class="font-semibold text-gray-900 mb-1">${opportunity.title || 'Untitled Opportunity'}</h4>
+                        <p class="text-sm text-gray-600">${opportunity.description || 'No description provided.'}</p>
+                    </div>
+                `).join('');
+                 document.getElementById('noContentOpportunities').classList.add('hidden');
+            } else {
+                 contentOpportunitiesItems.innerHTML = '';
+                 document.getElementById('noContentOpportunities').classList.remove('hidden');
+            }
+
+            // General Recommendations
+            const contentRecommendationsItems = document.getElementById('contentRecommendationsItems');
+            if (data.content_strategy.recommendations && data.content_strategy.recommendations.length > 0) {
+                 contentRecommendationsItems.innerHTML = data.content_strategy.recommendations.map(recommendation => `
+                     <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                         <span class="inline-block px-2 py-1 text-xs font-medium rounded-full mb-2 ${
+                            recommendation.type === 'content_length' ? 'bg-blue-100 text-blue-800' :
+                            recommendation.type === 'content_format' ? 'bg-teal-100 text-teal-800' :
+                            recommendation.type === 'intent_targeting' ? 'bg-indigo-100 text-indigo-800' :
+                            recommendation.type === 'serp_feature' ? 'bg-pink-100 text-pink-800' :
+                            'bg-gray-100 text-gray-800' // Default color
+                         }">${recommendation.type ? recommendation.type.replace(/_/g, ' ') : 'recommendation'}</span>
+                         <h4 class="font-semibold text-gray-900 mb-1">${recommendation.title || 'Untitled Recommendation'}</h4>
+                         <p class="text-sm text-gray-600">${recommendation.description || 'No description provided.'}</p>
+                     </div>
+                 `).join('');
+                  document.getElementById('noContentRecommendations').classList.add('hidden');
+            } else {
+                 contentRecommendationsItems.innerHTML = '';
+                  document.getElementById('noContentRecommendations').classList.remove('hidden');
+            }
+
+
+            // 5. Next Steps
+            const nextStepsList = document.getElementById('nextStepsList');
+            if (data.next_steps && data.next_steps.length > 0) {
+                nextStepsList.innerHTML = data.next_steps.map(step => `
+                    <div class="flex items-start">
+                        <div class="flex-shrink-0 h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-lg">
+                            ${step.step}
+                        </div>
+                        <div class="ml-4 flex-grow">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-1">${step.title}</h3>
+                            <p class="text-gray-700">${step.description}</p>
+                        </div>
+                    </div>
+                `).join('');
+                 document.getElementById('nextStepsSection').classList.remove('hidden');
+                 document.getElementById('noNextSteps').classList.add('hidden');
+            } else {
+                 nextStepsList.innerHTML = '';
+                 document.getElementById('nextStepsSection').classList.remove('hidden'); // Keep section visible
+                 document.getElementById('noNextSteps').classList.remove('hidden'); // Show "No data" message
+            }
+
+
+            // 6. Metadata
+            const metadataSection = document.getElementById('metadataSection');
+            if (data.metadata) {
+                 metadataSection.innerHTML = `
+                     <p>Processed in ${data.metadata.processing_time_seconds ? data.metadata.processing_time_seconds.toFixed(2) : '--'} seconds.
+                     SERP Keywords Processed: ${data.metadata.serp_keywords_processed || 0},
+                     URLs Analyzed: ${data.metadata.urls_analyzed || 0}.
+                     Version: ${data.metadata.version || 'N/A'}.
+                     Start Time: ${data.metadata.start_time || 'N/A'},
+                     End Time: ${data.metadata.end_time || 'N/A'}.
+                     </p>
+                 `;
+                 document.getElementById('metadataSection').classList.remove('hidden');
+            } else {
+                 document.getElementById('metadataSection').classList.add('hidden');
+            }
+
+             // Ensure Content Strategy section is hidden if BOTH opportunities and recommendations are empty
+             if ((!data.content_strategy.opportunities || data.content_strategy.opportunities.length === 0) &&
+                 (!data.content_strategy.recommendations || data.content_strategy.recommendations.length === 0)) {
+                 document.getElementById('contentStrategySection').classList.add('hidden');
+             } else {
+                 document.getElementById('contentStrategySection').classList.remove('hidden');
+             }
+
+
+        }
+
+        // Helper function to get color class for intent distribution bars
+        function getIntentColor(intent) {
+            switch (intent ? intent.toLowerCase() : '') {
+                case 'informational': return 'bg-blue-500';
+                case 'commercial': return 'bg-green-500';
+                case 'transactional': return 'bg-purple-500';
+                case 'navigational': return 'bg-yellow-500';
+                default: return 'bg-gray-500';
+            }
+        }
+
+         // Helper function to get color class for intent badges
+        function getIntentBadgeColor(intent) {
+            switch (intent ? intent.toLowerCase() : '') {
+                case 'informational': return 'bg-blue-100 text-blue-800';
+                case 'commercial': return 'bg-green-100 text-green-800';
+                case 'transactional': return 'bg-purple-100 text-purple-800';
+                case 'navigational': return 'bg-yellow-100 text-yellow-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+
+         // Helper function to get color for score bars
+         function getScoreColor(score) {
+             const s = Math.round(score); // Ensure score is an integer 0-100
+             if (s >= 80) return 'bg-green-500';
+             if (s >= 60) return 'bg-yellow-500';
+             if (s >= 40) return 'bg-orange-500';
+             return 'bg-red-500';
+         }
+
+         // --- Interactivity ---
+         function toggleExpandable(headerElement) {
+             headerElement.classList.toggle('expanded');
+             const content = headerElement.nextElementSibling;
+             if (content.style.display === 'block') {
+                 content.style.display = 'none';
+             } else {
+                 content.style.display = 'block';
+             }
+         }
+
+
+         // Make the toggleExpandable function globally accessible (needed because it's called from inline HTML)
+         window.toggleExpandable = toggleExpandable;
+
+
+    </script>
+</body>
+</html>
